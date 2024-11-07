@@ -7,17 +7,42 @@ import Levenshtein
 
 app = Flask(__name__)
 
+# Langues disponibles
+AVAILABLE_LANGUAGES = {
+    "sw": "Swahili",
+    "wo": "Wolof",
+    "fon": "Fon",
+    "en": "Anglais",
+    "fr": "Français"
+}
 
 def calculate_score(reference_text, user_text):
-    # Calculer la similarité entre les textes
     similarity = Levenshtein.ratio(reference_text.lower(), user_text.lower()) * 100
     return round(similarity, 2)
+
+@app.route('/available_languages', methods=['GET'])
+def available_languages():
+    """Retourne les langues disponibles pour la traduction."""
+    return jsonify(AVAILABLE_LANGUAGES)
 
 
 @app.route('/process_audio', methods=['POST'])
 def process_audio():
+    """Traite l'audio, traduit le texte et évalue la prononciation."""
     try:
-        # Étape 1 : Traduire le texte initial
+        # Étape 1 : Récupérer la langue cible depuis la requête
+        target_lang = request.json.get('target_lang')
+
+        if not target_lang:
+            return jsonify({"error": "Paramètre 'target_lang' manquant"}), 400
+
+        if target_lang not in AVAILABLE_LANGUAGES:
+            return jsonify({
+                "error": f"Langue cible '{target_lang}' non supportée.",
+                "available_languages": AVAILABLE_LANGUAGES  # Retourner la liste des langues disponibles
+            }), 400
+
+        # Étape 2 : Traduire le texte initial
         text = record_audio()
         if not text:
             return jsonify({"error": "No audio detected or transcription failed"}), 400
@@ -25,22 +50,17 @@ def process_audio():
         wit_response = send_to_wit(text)
         print("Wit.ai Response:", wit_response)
 
-        target_lang = request.json.get('target_lang', 'sw')
         translation = translate_text(text, target_lang)
-
         speak_translation(translation, lang=target_lang)
 
-        # Boucle pour répéter jusqu'à atteindre 80% ou plus
+        # Étape 3 : Boucle de répétition pour évaluer la prononciation
         score = 0
         while score < 80:
-            # Étape 2 : Demander à l'utilisateur de répéter
             repeat_text = record_audio()
             if not repeat_text:
                 return jsonify({"error": "No repeated audio detected"}), 400
 
-            # Étape 3 : Calculer le score
             score = calculate_score(translation, repeat_text)
-
             if score >= 80:
                 message = "Bravo! Félicitations, vous êtes un génie!"
                 return jsonify({
@@ -56,13 +76,12 @@ def process_audio():
             else:
                 message = "Pas mal! Vous pouvez encore améliorer."
 
-            # Informer l'utilisateur et le laisser essayer à nouveau
             return jsonify({
                 "translated_text": translation,
                 "repeated_text": repeat_text,
                 "score": score,
                 "message": message,
-                "retry": True  # Indique qu'il peut réessayer
+                "retry": True
             })
 
     except Exception as e:
@@ -71,6 +90,7 @@ def process_audio():
 
 if __name__ == '__main__':
     app.run(debug=True)
+
 
 """
 tu peux tester avec ce code dans le navigateur, tu decommente, puis tu le met la ou il faut
